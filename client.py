@@ -1,146 +1,148 @@
 import socket
 import threading
-import time
-import random  # 추가됨
 import json
+import pygame
+from game_core import *
 
-# 상수 및 Nation 클래스 (server.py와 동일)
-PREP_TIME = 60
-RESOURCE_START = 1000
-UNIT_COST = 100
-LEVEL_UP_COST = 50
-MAX_LEVEL = 10
+# Pygame 초기화
+pygame.init()
+SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.display.set_caption("국가전쟁 게임 - 국가2 (클라이언트)")
+font = pygame.font.SysFont(None, 30)
+clock = pygame.time.Clock()
 
-FIELDS = ["마법", "검술", "무술", "과학기술"]
-RELIGIONS = ["신앙A", "신앙B"]
-HEROES = ["대마법사", "소드마스터", "무신", "매드 사이언티스트"]
+# 색상 (server.py와 동일)
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+GREEN = (0, 255, 0)
+RED = (255, 0, 0)
 
-class Nation:
-    def __init__(self, name):
-        self.name = name
-        self.field = None
-        self.religion = None
-        self.hero = None
-        self.resources = RESOURCE_START
-        self.units = []
-        self.pinpoint_hp = 1000
-        self.buffs = {}
+nation2 = Nation("국가2")
 
-    def choose_field(self, choice):
-        self.field = FIELDS[choice - 1]
-        print(f"{self.name} 분야 선택: {self.field}")
+# 버튼 (server.py와 유사)
+buttons = [
+    Button(50, 400, 150, 50, "유닛 생성", lambda: nation2.create_unit(4) if nation2.create_unit(4) else print("실패")),
+    Button(220, 400, 150, 50, "훈련장 건설", lambda: nation2.build_facility(FacilityType.TRAINING)),
+    Button(390, 400, 150, 50, "정비소 건설", lambda: nation2.build_facility(FacilityType.REPAIR)),
+    Button(560, 400, 150, 50, "종료", lambda: pygame.quit())
+]
 
-    def choose_religion(self, choice):
-        self.religion = RELIGIONS[choice - 1]
-        if self.field == "마법" and self.religion == "신앙A":
-            self.buffs['atk'] = 1.1
-        else:
-            self.buffs['atk'] = 0.9
-        print(f"{self.name} 종교 선택: {self.religion}")
+# Button 클래스 (server.py와 동일 복사)
+class Button:
+    def __init__(self, x, y, w, h, text, action):
+        self.rect = pygame.Rect(x, y, w, h)
+        self.text = text
+        self.action = action
 
-    def choose_hero(self, choice):
-        self.hero = HEROES[choice - 1]
-        print(f"{self.name} 위인 선택: {self.hero}")
+    def draw(self):
+        pygame.draw.rect(screen, GREEN, self.rect)
+        text_surf = font.render(self.text, True, BLACK)
+        screen.blit(text_surf, (self.rect.x + 10, self.rect.y + 10))
 
-    def create_unit(self):
-        if self.resources >= UNIT_COST:
-            self.resources -= UNIT_COST
-            unit = {'level': 1, 'hp': 100, 'atk': 10}
-            if self.hero == "대마법사" and self.field == "마법":
-                unit['atk'] += 5
-            self.units.append(unit)
-            print(f"{self.name} 유닛 생성 → 총 {len(self.units)}기")
-        else:
-            print("자원 부족!")
+    def click(self):
+        self.action()
 
-    def level_up_unit(self, index):
-        if 0 <= index < len(self.units) and self.resources >= LEVEL_UP_COST:
-            unit = self.units[index]
-            if unit['level'] < MAX_LEVEL:
-                self.resources -= LEVEL_UP_COST
-                unit['level'] += 1
-                unit['hp'] += 50
-                unit['atk'] += 5
-                print(f"{self.name} 유닛 {index} 레벨업 → 레벨 {unit['level']}")
-            else:
-                print("최대 레벨입니다.")
-        else:
-            print("자원 부족 또는 잘못된 인덱스")
+def draw_game_state(nation, opponent_units):
+    screen.fill(WHITE)
+    
+    text = font.render(f"{nation.name} | 자원: {nation.resources} | 땅: {nation.land} | 유닛 수: {len(nation.units)}", True, BLACK)
+    screen.blit(text, (50, 50))
+    
+    text = font.render(f"분야: {nation.field} | 종교: {nation.religion} | 위인: {nation.hero}", True, BLACK)
+    screen.blit(text, (50, 100))
+    
+    text = font.render(f"상대 유닛 수: {opponent_units}", True, BLACK)
+    screen.blit(text, (50, 150))
+    
+    for btn in buttons:
+        btn.draw()
 
-def handle_server(conn, nation2):
-    print("준비 시간 시작...")
-    start = time.time()
-    while time.time() - start < PREP_TIME:
-        if random.random() < 0.1:
-            nation2.buffs['atk'] = 0.8
-            print(f"{nation2.name} 디버프 발생! (공격력 0.8배)")
-        time.sleep(1)
+    pygame.display.flip()
 
-    print("전쟁 시작! HP 업데이트 수신 중...")
+def receive_thread(conn):
     while True:
         try:
-            data = conn.recv(1024).decode()
-            if not data:
+            data = json.loads(conn.recv(2048).decode())
+            if 'winner' in data:
+                print(f"\n=== {data['winner']} 승리! ===")
                 break
-            hps = json.loads(data)
-            print(f"국가1 HP: {hps['hp1']:<6} | {nation2.name} HP: {hps['hp2']:<6}")
-            if hps['hp1'] <= 0 or hps['hp2'] <= 0:
-                winner = "국가1" if hps['hp2'] <= 0 else nation2.name
-                print(f"\n=== {winner} 승리! ===")
-                break
+            else:
+                global opponent_units
+                opponent_units = data['units1']  # 서버의 유닛 수
         except:
             break
 
 def main():
-    nation2 = Nation("국가2")
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    global opponent_units
+    opponent_units = 0
 
-    try:
-        client.connect(('localhost', 5555))
-    except:
-        print("서버에 연결할 수 없습니다. server.py를 먼저 실행하세요.")
-        return
+    client = socket.socket()
+    client.connect(('192.168.1.100', 5555))  # 서버 IP 변경
 
-    # 상대 정보 수신
-    try:
-        opp_data = client.recv(1024).decode()
-        opponent = json.loads(opp_data)
-        print(f"\n상대 → 분야:{opponent['field']} | 종교:{opponent['religion']} | 위인:{opponent['hero']}\n")
-    except:
-        print("상대 정보 수신 실패")
-        return
+    # 초기 설정 (Pygame 입력)
+    running = True
+    input_field = 0
+    inputs = ["", "", ""]
 
-    # 본인 설정 입력
-    print("=== 국가2 설정 ===")
-    field = int(input("분야 선택 (1~4): "))
+    while running and input_field < 3:
+        screen.fill(WHITE)
+        text = font.render("초기 설정 입력 (숫자 키):", True, BLACK)
+        screen.blit(text, (50, 50))
+        
+        prompts = ["분야 (0~3): ", "종교 (0~2): ", "위인 (0~3): "]
+        for i, p in enumerate(prompts):
+            color = RED if i == input_field else BLACK
+            text = font.render(p + inputs[i], True, color)
+            screen.blit(text, (50, 100 + i*50))
+        
+        pygame.display.flip()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN:
+                    try:
+                        val = int(inputs[input_field])
+                        if input_field == 0: field = val
+                        elif input_field == 1: religion = val
+                        elif input_field == 2: hero = val
+                        input_field += 1
+                    except:
+                        pass
+                elif event.key == pygame.K_BACKSPACE:
+                    inputs[input_field] = inputs[input_field][:-1]
+                else:
+                    inputs[input_field] += event.unicode
+
+    if not running: return
+
+    # 설정 전송 & 상대 수신
+    client.sendall(json.dumps({'field': field, 'religion': religion, 'hero': hero}).encode())
+    opp = json.loads(client.recv(2048).decode())
+    print(f"상대: 분야{FIELDS[opp['field']]}, 종교{RELIGIONS[opp['religion']]}, 위인{HEROES[opp['hero']]}")
+
     nation2.choose_field(field)
-    religion = int(input("종교 선택 (1~2): "))
     nation2.choose_religion(religion)
-    hero = int(input("위인 선택 (1~4): "))
     nation2.choose_hero(hero)
 
-    client.sendall(json.dumps({'field': field, 'religion': religion, 'hero': hero}).encode())
+    threading.Thread(target=receive_thread, args=(client,)).start()
 
-    # 통신 스레드 시작
-    threading.Thread(target=handle_server, args=(client, nation2), daemon=True).start()
+    # GUI 루프
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                for btn in buttons:
+                    if btn.rect.collidepoint(event.pos):
+                        btn.click()
 
-    # 입력 루프
-    print("\n명령어: create, level <번호>, quit")
-    while True:
-        try:
-            cmd = input().strip()
-            if cmd == "create":
-                nation2.create_unit()
-            elif cmd.startswith("level"):
-                parts = cmd.split()
-                if len(parts) == 2:
-                    idx = int(parts[1])
-                    nation2.level_up_unit(idx)
-            elif cmd == "quit":
-                break
-        except:
-            pass
+        draw_game_state(nation2, opponent_units)
+        clock.tick(30)
 
+    pygame.quit()
     client.close()
 
 if __name__ == "__main__":
