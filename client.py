@@ -27,6 +27,13 @@ game_over = False
 selected_unit = None
 msg = ""
 
+# 메시지 표시 함수
+def update_msg(result):
+    global msg
+    success, text = result
+    msg = text
+    threading.Timer(2.0, lambda: globals().update(msg="")).start()
+
 class Button:
     def __init__(self, x, y, w, h, txt, act):
         self.rect = pygame.Rect(x, y, w, h)
@@ -37,17 +44,11 @@ class Button:
     def click(self): self.act()
 
 buttons = [
-    Button(50, 500, 140, 50, "유닛 생성", lambda: show_msg(nation2.create_unit(nation2.border_line))),
-    Button(200, 500, 140, 50, "훈련장 건설", lambda: show_msg(nation2.build_facility(FacilityType.TRAINING))),
-    Button(350, 500, 140, 50, "의회 건설", lambda: show_msg(nation2.build_facility(FacilityType.PARLIAMENT))),
+    Button(50, 500, 140, 50, "유닛 생성", lambda: update_msg(nation2.create_unit(nation2.border_line))),
+    Button(200, 500, 140, 50, "훈련장 건설", lambda: update_msg(nation2.build_facility(FacilityType.TRAINING))),
+    Button(350, 500, 140, 50, "의회 건설", lambda: update_msg(nation2.build_facility(FacilityType.PARLIAMENT))),
     Button(600, 500, 140, 50, "종료", lambda: pygame.quit() or exit())
 ]
-
-def show_msg(result):
-    global msg
-    success, text = result
-    msg = text
-    threading.Timer(2.0, lambda: globals().update(msg="")).start()
 
 def draw_map():
     map_y = 180
@@ -58,13 +59,15 @@ def draw_map():
         pygame.draw.rect(screen, color, (x, map_y, cell_w-5, 140), border_radius=5)
         if i == nation2.border_line:
             pygame.draw.line(screen, (200,0,0), (x, map_y), (x, map_y+140), 6)
+        # 의회 (자원 수급처)
         if nation2.facilities[FacilityType.PARLIAMENT] and i == MAP_SIZE-1:
             pygame.draw.rect(screen, BROWN, (x+5, map_y+70, 50, 60))
             pygame.draw.polygon(screen, GRAY, [(x+30, map_y+70), (x+15, map_y+50), (x+45, map_y+50)])
             screen.blit(font.render("의회", True, BLACK), (x+8, map_y+100))
+        # 핀포인트
         if i == MAP_SIZE-1 and nation2.facilities[FacilityType.PINPOINT]:
             pygame.draw.circle(screen, YELLOW, (x+30, map_y+30), 15)
-            pygame.draw.star(screen, YELLOW, (x+30, map_y+30), 5, 20, 10)
+        # 유닛
         for u in nation2.units:
             if u['pos'] == i:
                 size = 12 + u['level']*2
@@ -96,7 +99,7 @@ def recv_thread(conn):
             opponent_units = data.get("units1", 0)
         except: break
 
-# === 입력 ===
+# 입력
 idx = 0
 inputs = ["", "", ""]
 field = religion = hero = None
@@ -133,7 +136,9 @@ cli.sendall(json.dumps({"field": field, "religion": religion, "hero": hero}).enc
 opp = json.loads(cli.recv(1024).decode())
 print(f"상대: {FIELDS[opp['field']]}, {RELIGIONS[opp['religion']]}, {HEROES[opp['hero']]}")
 
-nation2.choose_field(field); nation2.choose_religion(religion); nation2.choose_hero(hero)
+nation2.choose_field(field)
+nation2.choose_religion(religion)
+nation2.choose_hero(hero)
 threading.Thread(target=recv_thread, args=(cli,), daemon=True).start()
 
 while True:
@@ -153,4 +158,5 @@ while True:
             if nation2.border_line < cell < MAP_SIZE and cell != selected_unit['pos']:
                 selected_unit['pos'] = cell
             selected_unit = None
-    draw(); clock.tick(30)
+    draw()
+    clock.tick(30)
