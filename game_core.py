@@ -31,19 +31,25 @@ class Nation:
         self.hero = None
         self.resources = RESOURCE_START
         self.land = LAND_START
-        self.units = []  # 유닛 리스트
+        self.units = []
         self.facilities = {f: False for f in FacilityType}
-        self.facilities[FacilityType.PINPOINT] = True  # 기본 제공
+        self.facilities[FacilityType.PINPOINT] = True
         self.buffs = {}
         self.debuffs = {}
-        self.border_line = 5  # 군사분계선 위치
+        self.border_line = 5
 
-    # 선택 메서드
-    def choose_field(self, idx): self.field = FIELDS[idx]
-    def choose_religion(self, idx): self.religion = RELIGIONS[idx]
-    def choose_hero(self, idx): self.hero = HEROES[idx]
+    def choose_field(self, idx):
+        if 0 <= idx < len(FIELDS):
+            self.field = FIELDS[idx]
 
-    # 버프 계산
+    def choose_religion(self, idx):
+        if 0 <= idx < len(RELIGIONS):
+            self.religion = RELIGIONS[idx]
+
+    def choose_hero(self, idx):
+        if 0 <= idx < len(HEROES):
+            self.hero = HEROES[idx]
+
     def apply_buffs(self):
         buff = 1.0
         if self.field == "마법" and self.religion == "신앙A":
@@ -52,25 +58,27 @@ class Nation:
             buff *= 0.7
         return buff
 
-    # 유닛 생성
     def create_unit(self, pos):
         if self.resources >= UNIT_COST and self.facilities[FacilityType.TRAINING]:
             self.resources -= UNIT_COST
-            unit = {'type': 'soldier', 'level': 1, 'hp': 100, 'atk': 10, 'pos': pos}
+            unit = {
+                'type': 'soldier',
+                'level': 1,
+                'hp': 100,
+                'atk': 10,
+                'pos': pos
+            }
             if self.hero == "대마법사" and self.field == "마법":
                 unit['atk'] += 8
             self.units.append(unit)
             return True
         return False
 
-    # 유닛 레벨업
-    def level_up_unit(self, idx): ...
-
-    # 시설 건설
     def build_facility(self, fac_type):
         cost = {"정비소": 300, "훈련장": 400, "의회": 500, "술집": 200, "보건소": 350}
-        if fac_type.value in cost and self.resources >= cost[fac_type.value]:
-            self.resources -= cost[fac_type.value]
+        name = fac_type.value
+        if name in cost and self.resources >= cost[name]:
+            self.resources -= cost[name]
             self.facilities[fac_type] = True
             return True
         return False
