@@ -1,188 +1,158 @@
 # server.py
-import socket
-import threading
-import time
-import json
-import random
-import pygame
+import socket, threading, time, json, random, pygame
 from game_core import *
 
-# === Pygame 초기화 ===
 pygame.init()
-SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("국가전쟁 게임 - 국가1 (서버)")
-font = pygame.font.Font("NotoSansKR-Regular.ttf", 30)
+W, H = 800, 600
+screen = pygame.display.set_mode((W, H))
+pygame.display.set_caption("국가1 - 서버")
 clock = pygame.time.Clock()
 
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-GREEN = (0, 255, 0)
-RED = (255, 0, 0)
+# 폰트 (TTF 우선, 없으면 시스템 폰트)
+try:
+    font = pygame.font.Font("NotoSansKR-Regular.ttf", 28)
+except:
+    font = pygame.font.SysFont("Malgun Gothic", 28)
 
-# === 국가 생성 ===
+WHITE = (255,255,255)
+BLUE = (100,150,255)
+RED = (255,100,100)
+GREEN = (0,200,0)
+YELLOW = (255,255,0)
+BLACK = (0,0,0)
+
 nation1 = Nation("국가1")
 nation2 = Nation("국가2")
+selected_unit = None
 
-# === 버튼 클래스 ===
+# 버튼
 class Button:
-    def __init__(self, x, y, w, h, text, action):
+    def __init__(self, x, y, w, h, txt, act):
         self.rect = pygame.Rect(x, y, w, h)
-        self.text = text
-        self.action = action
-
+        self.txt, self.act = txt, act
     def draw(self):
-        pygame.draw.rect(screen, GREEN, self.rect)
-        text_surf = font.render(self.text, True, BLACK)
-        screen.blit(text_surf, (self.rect.x + 10, self.rect.y + 10))
+        pygame.draw.rect(screen, GREEN, self.rect, border_radius=8)
+        screen.blit(font.render(self.txt, True, BLACK), (self.rect.x+10, self.rect.y+8))
+    def click(self): self.act()
 
-    def click(self):
-        self.action()
-
-# === 버튼 목록 ===
 buttons = [
-    Button(50, 400, 150, 50, "유닛 생성", lambda: print("생성 성공" if nation1.create_unit(4) else "훈련장 필요")),
-    Button(220, 400, 150, 50, "훈련장 건설", lambda: print("건설 성공" if nation1.build_facility(FacilityType.TRAINING) else "자원 부족")),
-    Button(390, 400, 150, 50, "정비소 건설", lambda: print("건설 성공" if nation1.build_facility(FacilityType.REPAIR) else "자원 부족")),
-    Button(560, 400, 150, 50, "종료", lambda: pygame.quit() or exit())
+    Button(50, 500, 140, 50, "유닛 생성", lambda: nation1.create_unit(nation1.border_line-1) or print("생성!")),
+    Button(200, 500, 140, 50, "훈련장 건설", lambda: nation1.build_facility(FacilityType.TRAINING) or print("건설!")),
+    Button(350, 500, 140, 50, "의회 건설", lambda: nation1.build_facility(FacilityType.PARLIAMENT) or print("의회 건설!")),
+    Button(600, 500, 140, 50, "종료", lambda: pygame.quit() or exit())
 ]
 
-# === 화면 그리기 ===
-def draw_game_state():
+def draw_map():
+    map_y = 180
+    cell_w = 65
+    for i in range(MAP_SIZE):
+        x = 60 + i * cell_w
+        color = BLUE if i < nation1.border_line else RED
+        pygame.draw.rect(screen, color, (x, map_y, cell_w-5, 140), border_radius=5)
+        if i == nation1.border_line:
+            pygame.draw.line(screen, (200,0,0), (x, map_y), (x, map_y+140), 6)
+        # 유닛
+        for u in nation1.units:
+            if u['pos'] == i:
+                size = 12 + u['level']*2
+                pygame.draw.circle(screen, GREEN, (x+20, map_y+70), size)
+                if u == selected_unit:
+                    pygame.draw.circle(screen, YELLOW, (x+20, map_y+70), size+5, 3)
+        for u in nation2.units:
+            if u['pos'] == i:
+                pygame.draw.circle(screen, (200,0,0), (x+40, map_y+70), 12 + u['level']*2)
+
+def draw():
     screen.fill(WHITE)
-    text = font.render(f"{nation1.name} | 자원: {nation1.resources} | 유닛: {len(nation1.units)}", True, BLACK)
-    screen.blit(text, (50, 50))
-    text = font.render(f"분야: {nation1.field or '미정'} | 종교: {nation1.religion or '미정'} | 위인: {nation1.hero or '미정'}", True, BLACK)
-    screen.blit(text, (50, 100))
-    text = font.render(f"적군 유닛: {len(nation2.units)}", True, RED)
-    screen.blit(text, (50, 150))
-    for btn in buttons:
-        btn.draw()
+    # 상태바
+    nation1.collect_tax()
+    tax_rate = TAX_RATE if nation1.facilities[FacilityType.PARLIAMENT] else 0
+    screen.blit(font.render(f"{nation1.name} | 자원: {nation1.resources} (+{tax_rate}/s)", True, BLACK), (50, 50))
+    screen.blit(font.render(f"유닛: {len(nation1.units)} | 적군: {len(nation2.units)}", True, BLACK), (50, 90))
+    draw_map()
+    for b in buttons: b.draw()
     pygame.display.flip()
 
-# === 클라이언트 처리 ===
 def handle_client(conn):
     global nation2
     try:
-        data = json.loads(conn.recv(2048).decode())
-        nation2.choose_field(data['field'])
-        nation2.choose_religion(data['religion'])
-        nation2.choose_hero(data['hero'])
-    except:
-        return
+        data = json.loads(conn.recv(1024).decode())
+        nation2.choose_field(data["field"])
+        nation2.choose_religion(data["religion"])
+        nation2.choose_hero(data["hero"])
+    except: return
+    conn.sendall(json.dumps({
+        "field": FIELDS.index(nation1.field),
+        "religion": RELIGIONS.index(nation1.religion),
+        "hero": HEROES.index(nation1.hero)
+    }).encode())
 
-    try:
-        conn.sendall(json.dumps({
-            'field': FIELDS.index(nation1.field),
-            'religion': RELIGIONS.index(nation1.religion),
-            'hero': HEROES.index(nation1.hero)
-        }).encode())
-    except:
-        return
-
-    # 준비 시간
     start = time.time()
     while time.time() - start < PREP_TIME:
-        if random.random() < 0.05:
-            nation1.debuffs['corruption'] = True
+        if random.random() < 0.03: nation1.debuffs["corruption"] = True
         time.sleep(1)
 
-    # 전투 루프
     while nation1.facilities[FacilityType.PINPOINT] and nation2.facilities[FacilityType.PINPOINT]:
-        atk1 = sum(u['atk'] for u in nation1.units) * nation1.apply_buffs()
-        atk2 = sum(u['atk'] for u in nation2.units) * nation2.apply_buffs()
+        atk1 = sum(u["atk"] for u in nation1.units) * nation1.apply_buffs()
+        atk2 = sum(u["atk"] for u in nation2.units) * nation2.apply_buffs()
+        for u in nation2.units: u["hp"] -= atk1 / max(1, len(nation2.units))
+        for u in nation1.units: u["hp"] -= atk2 / max(1, len(nation1.units))
+        nation2.units = [u for u in nation2.units if u["hp"] > 0]
+        nation1.units = [u for u in nation1.units if u["hp"] > 0]
+        try: conn.sendall(json.dumps({"units1": len(nation1.units), "units2": len(nation2.units)}).encode())
+        except: break
+        time.sleep(1.5)
 
-        for u in nation2.units:
-            u['hp'] -= atk1 / max(1, len(nation2.units))
-        for u in nation1.units:
-            u['hp'] -= atk2 / max(1, len(nation1.units))
-
-        nation2.units = [u for u in nation2.units if u['hp'] > 0]
-        nation1.units = [u for u in nation1.units if u['hp'] > 0]
-
-        try:
-            conn.sendall(json.dumps({
-                'units1': len(nation1.units),
-                'units2': len(nation2.units),
-                'winner': None
-            }).encode())
-        except:
-            break
-        time.sleep(2)
-
-    winner = nation1.name if not nation2.facilities[FacilityType.PINPOINT] else nation2.name
-    try:
-        conn.sendall(json.dumps({'winner': winner}).encode())
-    except:
-        pass
+    winner = "국가1" if not nation2.facilities[FacilityType.PINPOINT] else "국가2"
+    conn.sendall(json.dumps({"winner": winner}).encode())
     conn.close()
 
-# === 메인 함수 ===
 def main():
-    running = True
-    input_field = 0
-    inputs = ["", "", ""]
-
-    # 초기 설정 입력
-    while running and input_field < 3:
+    # 초기 설정
+    idx = 0; inputs = ["", "", ""]
+    while idx < 3:
         screen.fill(WHITE)
-        text = font.render("초기 설정 (숫자 입력 후 엔터):", True, BLACK)
-        screen.blit(text, (50, 50))
-        prompts = ["분야 (0~3): ", "종교 (0~2): ", "위인 (0~3): "]
-        for i, p in enumerate(prompts):
-            color = RED if i == input_field else BLACK
-            text = font.render(p + inputs[i], True, color)
-            screen.blit(text, (50, 100 + i*50))
+        for i, p in enumerate(["분야 (0~3): ", "종교 (0~2): ", "위인 (0~3): "]):
+            col = RED if i == idx else BLACK
+            screen.blit(font.render(p + inputs[i], True, col), (50, 100 + i*50))
         pygame.display.flip()
+        for e in pygame.event.get():
+            if e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_RETURN and inputs[idx]:
+                    val = int(inputs[idx])
+                    if idx == 0: field = val
+                    elif idx == 1: religion = val
+                    elif idx == 2: hero = val
+                    idx += 1; if idx < 3: inputs[idx] = ""
+                elif e.key == pygame.K_BACKSPACE: inputs[idx] = inputs[idx][:-1]
+                elif e.unicode.isdigit(): inputs[idx] += e.unicode
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_RETURN and inputs[input_field]:
-                    val = int(inputs[input_field])
-                    if input_field == 0: field = val
-                    elif input_field == 1: religion = val
-                    elif input_field == 2: hero = val
-                    input_field += 1
-                    if input_field < 3:
-                        inputs[input_field] = ""
-                elif event.key == pygame.K_BACKSPACE:
-                    inputs[input_field] = inputs[input_field][:-1]
-                elif event.unicode.isdigit():
-                    inputs[input_field] += event.unicode
+    nation1.choose_field(field); nation1.choose_religion(religion); nation1.choose_hero(hero)
 
-    if not running: return
-
-    nation1.choose_field(field)
-    nation1.choose_religion(religion)
-    nation1.choose_hero(hero)
-
-    # 서버 시작
-    server = socket.socket()
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(('0.0.0.0', 5555))
-    server.listen(1)
-    print("서버 대기 중... (클라이언트 연결 대기)")
-
-    conn, addr = server.accept()
-    print(f"연결됨: {addr}")
+    s = socket.socket(); s.bind(('0.0.0.0', 5555)); s.listen(1)
+    print("서버 대기 중...")
+    conn, _ = s.accept()
     threading.Thread(target=handle_client, args=(conn,), daemon=True).start()
 
-    # GUI 루프
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                for btn in buttons:
-                    if btn.rect.collidepoint(event.pos):
-                        btn.click()
-        draw_game_state()
-        clock.tick(30)
+    global selected_unit
+    while True:
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT: return
+            if e.type == pygame.MOUSEBUTTONDOWN:
+                pos = e.pos
+                for b in buttons:
+                    if b.rect.collidepoint(pos): b.click()
+                # 유닛 선택
+                cell = (pos[0] - 60) // 65
+                if 0 <= cell < MAP_SIZE:
+                    for u in nation1.units:
+                        if u['pos'] == cell:
+                            selected_unit = u; break
+            if e.type == pygame.MOUSEBUTTONUP and selected_unit:
+                cell = (e.pos[0] - 60) // 65
+                if 0 <= cell < nation1.border_line and cell != selected_unit['pos']:
+                    selected_unit['pos'] = cell
+                selected_unit = None
+        draw(); clock.tick(30)
 
-    pygame.quit()
-    server.close()
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
