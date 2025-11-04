@@ -18,6 +18,7 @@ RED = (255,100,100)
 GREEN = (0,200,0)
 YELLOW = (255,255,0)
 BLACK = (0,0,0)
+BROWN = (139, 69, 19)
 
 nation2 = Nation("국가2")
 opponent_units = 0
@@ -34,9 +35,9 @@ class Button:
     def click(self): self.act()
 
 buttons = [
-    Button(50, 500, 140, 50, "유닛 생성", lambda: nation2.create_unit(nation2.border_line) or print("유닛 생성!")),
-    Button(200, 500, 140, 50, "훈련장 건설", lambda: nation2.build_facility(FacilityType.TRAINING) or print("훈련장 건설!")),
-    Button(350, 500, 140, 50, "의회 건설", lambda: nation2.build_facility(FacilityType.PARLIAMENT) or print("의회 건설!")),
+    Button(50, 500, 140, 50, "유닛 생성", lambda: nation2.create_unit(nation2.border_line) or print("유닛 생성")),
+    Button(200, 500, 140, 50, "훈련장 건설", lambda: nation2.build_facility(FacilityType.TRAINING) or print("훈련장 건설")),
+    Button(350, 500, 140, 50, "의회 건설", lambda: nation2.build_facility(FacilityType.PARLIAMENT) or print("의회 건설")),
     Button(600, 500, 140, 50, "종료", lambda: pygame.quit() or exit())
 ]
 
@@ -49,6 +50,9 @@ def draw_map():
         pygame.draw.rect(screen, color, (x, map_y, cell_w-5, 140), border_radius=5)
         if i == nation2.border_line:
             pygame.draw.line(screen, (200,0,0), (x, map_y), (x, map_y+140), 6)
+        if nation2.facilities[FacilityType.PARLIAMENT] and i == MAP_SIZE-1:
+            pygame.draw.rect(screen, BROWN, (x+10, map_y+80, 40, 50))
+            pygame.draw.polygon(screen, (200,200,200), [(x+30, map_y+80), (x+15, map_y+60), (x+45, map_y+60)])
         for u in nation2.units:
             if u['pos'] == i:
                 size = 12 + u['level']*2
@@ -59,11 +63,10 @@ def draw_map():
 def draw():
     screen.fill(WHITE)
     nation2.collect_tax()
-    tax_rate = TAX_RATE if nation2.facilities[FacilityType.PARLIAMENT] else 0
-    screen.blit(font.render(f"{nation2.name} | 자원: {nation2.resources} (+{tax_rate}/s)", True, BLACK), (50, 50))
-    screen.blit(font.render(f"유닛: {len(nation2.units)} | 적군: {opponent_units}", True, BLACK), (50, 90))
-    if game_over:
-        screen.blit(font.render("게임 종료!", True, RED), (300, 250))
+    tax = TAX_RATE if nation2.facilities[FacilityType.PARLIAMENT] else 0
+    screen.blit(font.render(f"{nation2.name} | 자원: {nation2.resources} (+{tax}/s)", True, BLACK), (50, 50))
+    screen.blit(font.render(f"유닛: {len(nation2.units)} | 적: {opponent_units}", True, BLACK), (50, 90))
+    if game_over: screen.blit(font.render("게임 종료!", True, RED), (300, 250))
     draw_map()
     for b in buttons: b.draw()
     pygame.display.flip()
@@ -80,7 +83,7 @@ def recv_thread(conn):
             opponent_units = data.get("units1", 0)
         except: break
 
-# === 입력 안전하게 처리 ===
+# === 입력 ===
 idx = 0
 inputs = ["", "", ""]
 field = religion = hero = None
@@ -93,9 +96,7 @@ while idx < 3:
     pygame.display.flip()
 
     for e in pygame.event.get():
-        if e.type == pygame.QUIT:
-            pygame.quit()
-            exit()
+        if e.type == pygame.QUIT: exit()
         if e.type == pygame.KEYDOWN:
             if e.key == pygame.K_RETURN and inputs[idx].strip():
                 try:
@@ -105,28 +106,21 @@ while idx < 3:
                     elif idx == 2 and 0 <= val < 4: hero = val
                     else: continue
                     idx += 1
-                    if idx < 3:
-                        inputs[idx] = ""
-                    else:
-                        break
+                    if idx < 3: inputs[idx] = ""
+                    else: break
                 except: pass
-            elif e.key == pygame.K_BACKSPACE:
-                inputs[idx] = inputs[idx][:-1]
-            elif e.unicode.isdigit():
-                inputs[idx] += e.unicode
-    else:
-        continue
+            elif e.key == pygame.K_BACKSPACE: inputs[idx] = inputs[idx][:-1]
+            elif e.unicode.isdigit(): inputs[idx] += e.unicode
+    else: continue
     break
 
 cli = socket.socket()
-cli.connect(('172.16.200.209', 5555))  # ← 서버 IP로 변경!
+cli.connect(('192.168.1.100', 5555))
 cli.sendall(json.dumps({"field": field, "religion": religion, "hero": hero}).encode())
 opp = json.loads(cli.recv(1024).decode())
 print(f"상대: {FIELDS[opp['field']]}, {RELIGIONS[opp['religion']]}, {HEROES[opp['hero']]}")
 
-nation2.choose_field(field)
-nation2.choose_religion(religion)
-nation2.choose_hero(hero)
+nation2.choose_field(field); nation2.choose_religion(religion); nation2.choose_hero(hero)
 threading.Thread(target=recv_thread, args=(cli,), daemon=True).start()
 
 while True:
@@ -146,5 +140,4 @@ while True:
             if nation2.border_line < cell < MAP_SIZE and cell != selected_unit['pos']:
                 selected_unit['pos'] = cell
             selected_unit = None
-    draw()
-    clock.tick(30)
+    draw(); clock.tick(30)
