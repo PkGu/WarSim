@@ -24,7 +24,16 @@ BROWN = (139, 69, 19)
 nation1 = Nation("국가1")
 nation2 = Nation("국가2")
 selected_unit = None
+msg = ""
 
+# 메시지 표시 함수
+def update_msg(result):
+    global msg
+    success, text = result
+    msg = text
+    threading.Timer(2.0, lambda: globals().update(msg="")).start()
+
+# 버튼
 class Button:
     def __init__(self, x, y, w, h, txt, act):
         self.rect = pygame.Rect(x, y, w, h)
@@ -35,9 +44,9 @@ class Button:
     def click(self): self.act()
 
 buttons = [
-    Button(50, 500, 140, 50, "유닛 생성", lambda: nation1.create_unit(nation1.border_line-1) or print("유닛 생성")),
-    Button(200, 500, 140, 50, "훈련장 건설", lambda: nation1.build_facility(FacilityType.TRAINING) or print("훈련장 건설")),
-    Button(350, 500, 140, 50, "의회 건설", lambda: nation1.build_facility(FacilityType.PARLIAMENT) or print("의회 건설")),
+    Button(50, 500, 140, 50, "유닛 생성", lambda: update_msg(nation1.create_unit(nation1.border_line - 1))),
+    Button(200, 500, 140, 50, "훈련장 건설", lambda: update_msg(nation1.build_facility(FacilityType.TRAINING))),
+    Button(350, 500, 140, 50, "의회 건설", lambda: update_msg(nation1.build_facility(FacilityType.PARLIAMENT))),
     Button(600, 500, 140, 50, "종료", lambda: pygame.quit() or exit())
 ]
 
@@ -46,16 +55,15 @@ def draw_map():
     cell_w = 65
     for i in range(MAP_SIZE):
         x = 60 + i * cell_w
-        # 배경
         color = BLUE if i < nation1.border_line else RED
         pygame.draw.rect(screen, color, (x, map_y, cell_w-5, 140), border_radius=5)
-        # 분계선
         if i == nation1.border_line:
             pygame.draw.line(screen, (200,0,0), (x, map_y), (x, map_y+140), 6)
-        # 의회 (자원 수급처)
+        # 의회 건물
         if nation1.facilities[FacilityType.PARLIAMENT] and i == 0:
-            pygame.draw.rect(screen, BROWN, (x+10, map_y+80, 40, 50))
-            pygame.draw.polygon(screen, (200,200,200), [(x+30, map_y+80), (x+15, map_y+60), (x+45, map_y+60)])
+            pygame.draw.rect(screen, BROWN, (x+5, map_y+70, 50, 60))
+            pygame.draw.polygon(screen, (200,200,200), [(x+30, map_y+70), (x+15, map_y+50), (x+45, map_y+50)])
+            screen.blit(font.render("의회", True, BLACK), (x+8, map_y+100))
         # 유닛
         for u in nation1.units:
             if u['pos'] == i:
@@ -63,9 +71,6 @@ def draw_map():
                 pygame.draw.circle(screen, GREEN, (x+20, map_y+70), size)
                 if u == selected_unit:
                     pygame.draw.circle(screen, YELLOW, (x+20, map_y+70), size+5, 3)
-        for u in nation2.units:
-            if u['pos'] == i:
-                pygame.draw.circle(screen, (200,0,0), (x+40, map_y+70), 12 + u['level']*2)
 
 def draw():
     screen.fill(WHITE)
@@ -73,10 +78,12 @@ def draw():
     tax = TAX_RATE if nation1.facilities[FacilityType.PARLIAMENT] else 0
     screen.blit(font.render(f"{nation1.name} | 자원: {nation1.resources} (+{tax}/s)", True, BLACK), (50, 50))
     screen.blit(font.render(f"유닛: {len(nation1.units)} | 적: {len(nation2.units)}", True, BLACK), (50, 90))
+    if msg: screen.blit(font.render(msg, True, (0,150,0)), (50, 130))
     draw_map()
     for b in buttons: b.draw()
     pygame.display.flip()
 
+# 클라이언트 처리
 def handle_client(conn):
     global nation2
     try:
@@ -110,7 +117,7 @@ def handle_client(conn):
     conn.sendall(json.dumps({"winner": winner}).encode())
     conn.close()
 
-# === 입력 안전 처리 ===
+# 입력 루프
 idx = 0
 inputs = ["", "", ""]
 field = religion = hero = None
@@ -118,7 +125,7 @@ field = religion = hero = None
 while idx < 3:
     screen.fill(WHITE)
     for i, p in enumerate(["분야 (0~3): ", "종교 (0~2): ", "위인 (0~3): "]):
-        col = RED if i == idx else BLACK
+        col = (255,0,0) if i == idx else BLACK
         screen.blit(font.render(p + inputs[i], True, col), (50, 100 + i*50))
     pygame.display.flip()
 
