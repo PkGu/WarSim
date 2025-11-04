@@ -1,159 +1,150 @@
 # client.py
-import socket
-import threading
-import json
-import pygame
+import socket, threading, json, pygame, time
 from game_core import *
 
-# === Pygame 초기화 ===
 pygame.init()
-SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("국가전쟁 게임 - 국가2 (클라이언트)")
-font = pygame.font.Font("NotoSansKR-Regular.ttf", 30)
+screen = pygame.display.set_mode((800, 600))
+pygame.display.set_caption("국가2 - 클라이언트")
 clock = pygame.time.Clock()
 
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-GREEN = (0, 255, 0)
-RED = (255, 0, 0)
+try:
+    font = pygame.font.Font("NotoSansKR-Regular.ttf", 28)
+except:
+    font = pygame.font.SysFont("Malgun Gothic", 28)
+
+WHITE = (255,255,255)
+BLUE = (100,150,255)
+RED = (255,100,100)
+GREEN = (0,200,0)
+YELLOW = (255,255,0)
+BLACK = (0,0,0)
 
 nation2 = Nation("국가2")
-
-# === 버튼 클래스 ===
-class Button:
-    def __init__(self, x, y, w, h, text, action):
-        self.rect = pygame.Rect(x, y, w, h)
-        self.text = text
-        self.action = action
-
-    def draw(self):
-        pygame.draw.rect(screen, GREEN, self.rect)
-        text_surf = font.render(self.text, True, BLACK)
-        screen.blit(text_surf, (self.rect.x + 10, self.rect.y + 10))
-
-    def click(self):
-        self.action()
-
-# === 버튼 목록 ===
-buttons = [
-    Button(50, 400, 150, 50, "유닛 생성", lambda: print("생성 성공" if nation2.create_unit(4) else "훈련장 필요")),
-    Button(220, 400, 150, 50, "훈련장 건설", lambda: print("건설 성공" if nation2.build_facility(FacilityType.TRAINING) else "자원 부족")),
-    Button(390, 400, 150, 50, "정비소 건설", lambda: print("건설 성공" if nation2.build_facility(FacilityType.REPAIR) else "자원 부족")),
-    Button(560, 400, 150, 50, "종료", lambda: pygame.quit() or exit())
-]
-
 opponent_units = 0
 game_over = False
+selected_unit = None
 
-# === 화면 그리기 ===
-def draw_game_state():
+class Button:
+    def __init__(self, x, y, w, h, txt, act):
+        self.rect = pygame.Rect(x, y, w, h)
+        self.txt, self.act = txt, act
+    def draw(self):
+        pygame.draw.rect(screen, GREEN, self.rect, border_radius=8)
+        screen.blit(font.render(self.txt, True, BLACK), (self.rect.x+10, self.rect.y+8))
+    def click(self): self.act()
+
+buttons = [
+    Button(50, 500, 140, 50, "유닛 생성", lambda: nation2.create_unit(nation2.border_line) or print("유닛 생성!")),
+    Button(200, 500, 140, 50, "훈련장 건설", lambda: nation2.build_facility(FacilityType.TRAINING) or print("훈련장 건설!")),
+    Button(350, 500, 140, 50, "의회 건설", lambda: nation2.build_facility(FacilityType.PARLIAMENT) or print("의회 건설!")),
+    Button(600, 500, 140, 50, "종료", lambda: pygame.quit() or exit())
+]
+
+def draw_map():
+    map_y = 180
+    cell_w = 65
+    for i in range(MAP_SIZE):
+        x = 60 + i * cell_w
+        color = RED if i > nation2.border_line else BLUE
+        pygame.draw.rect(screen, color, (x, map_y, cell_w-5, 140), border_radius=5)
+        if i == nation2.border_line:
+            pygame.draw.line(screen, (200,0,0), (x, map_y), (x, map_y+140), 6)
+        for u in nation2.units:
+            if u['pos'] == i:
+                size = 12 + u['level']*2
+                pygame.draw.circle(screen, GREEN, (x+20, map_y+70), size)
+                if u == selected_unit:
+                    pygame.draw.circle(screen, YELLOW, (x+20, map_y+70), size+5, 3)
+
+def draw():
     screen.fill(WHITE)
-    text = font.render(f"{nation2.name} | 자원: {nation2.resources} | 유닛: {len(nation2.units)}", True, BLACK)
-    screen.blit(text, (50, 50))
-    text = font.render(f"분야: {nation2.field or '미정'} | 종교: {nation2.religion or '미정'} | 위인: {nation2.hero or '미정'}", True, BLACK)
-    screen.blit(text, (50, 100))
-    text = font.render(f"적군 유닛: {opponent_units}", True, RED)
-    screen.blit(text, (50, 150))
+    nation2.collect_tax()
+    tax_rate = TAX_RATE if nation2.facilities[FacilityType.PARLIAMENT] else 0
+    screen.blit(font.render(f"{nation2.name} | 자원: {nation2.resources} (+{tax_rate}/s)", True, BLACK), (50, 50))
+    screen.blit(font.render(f"유닛: {len(nation2.units)} | 적군: {opponent_units}", True, BLACK), (50, 90))
     if game_over:
-        text = font.render("게임 종료!", True, RED)
-        screen.blit(text, (300, 250))
-    for btn in buttons:
-        btn.draw()
+        screen.blit(font.render("게임 종료!", True, RED), (300, 250))
+    draw_map()
+    for b in buttons: b.draw()
     pygame.display.flip()
 
-# === 수신 스레드 ===
-def receive_thread(conn):
+def recv_thread(conn):
     global opponent_units, game_over
     while True:
         try:
-            data = json.loads(conn.recv(2048).decode())
-            if 'winner' in data:
-                print(f"\n=== {data['winner']} 승리! ===")
+            data = json.loads(conn.recv(1024).decode())
+            if "winner" in data:
+                print(data["winner"], "승리!")
                 game_over = True
                 break
-            else:
-                opponent_units = data.get('units1', 0)
-        except:
-            break
+            opponent_units = data.get("units1", 0)
+        except: break
 
-# === 메인 함수 ===
-def main():
-    global opponent_units
+# === 입력 안전하게 처리 ===
+idx = 0
+inputs = ["", "", ""]
+field = religion = hero = None
 
-    client = socket.socket()
-    try:
-        client.connect(('172.16.200.209', 5555))  # ← 서버 IP로 변경!
-    except Exception as e:
-        print("서버 연결 실패:", e)
-        input("엔터 누르고 종료...")
-        return
+while idx < 3:
+    screen.fill(WHITE)
+    for i, p in enumerate(["분야 (0~3): ", "종교 (0~2): ", "위인 (0~3): "]):
+        col = RED if i == idx else BLACK
+        screen.blit(font.render(p + inputs[i], True, col), (50, 100 + i*50))
+    pygame.display.flip()
 
-    running = True
-    input_field = 0
-    inputs = ["", "", ""]
+    for e in pygame.event.get():
+        if e.type == pygame.QUIT:
+            pygame.quit()
+            exit()
+        if e.type == pygame.KEYDOWN:
+            if e.key == pygame.K_RETURN and inputs[idx].strip():
+                try:
+                    val = int(inputs[idx])
+                    if idx == 0 and 0 <= val < 4: field = val
+                    elif idx == 1 and 0 <= val < 3: religion = val
+                    elif idx == 2 and 0 <= val < 4: hero = val
+                    else: continue
+                    idx += 1
+                    if idx < 3:
+                        inputs[idx] = ""
+                    else:
+                        break
+                except: pass
+            elif e.key == pygame.K_BACKSPACE:
+                inputs[idx] = inputs[idx][:-1]
+            elif e.unicode.isdigit():
+                inputs[idx] += e.unicode
+    else:
+        continue
+    break
 
-    # 초기 설정 입력
-    while running and input_field < 3:
-        screen.fill(WHITE)
-        text = font.render("초기 설정 (숫자 입력 후 엔터):", True, BLACK)
-        screen.blit(text, (50, 50))
-        prompts = ["분야 (0~3): ", "종교 (0~2): ", "위인 (0~3): "]
-        for i, p in enumerate(prompts):
-            color = RED if i == input_field else BLACK
-            text = font.render(p + inputs[i], True, color)
-            screen.blit(text, (50, 100 + i*50))
-        pygame.display.flip()
+cli = socket.socket()
+cli.connect(('172.16.200.209', 5555))  # ← 서버 IP로 변경!
+cli.sendall(json.dumps({"field": field, "religion": religion, "hero": hero}).encode())
+opp = json.loads(cli.recv(1024).decode())
+print(f"상대: {FIELDS[opp['field']]}, {RELIGIONS[opp['religion']]}, {HEROES[opp['hero']]}")
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_RETURN and inputs[input_field]:
-                    val = int(inputs[input_field])
-                    if input_field == 0: field = val
-                    elif input_field == 1: religion = val
-                    elif input_field == 2: hero = val
-                    input_field += 1
-                    if input_field < 3:
-                        inputs[input_field] = ""
-                elif event.key == pygame.K_BACKSPACE:
-                    inputs[input_field] = inputs[input_field][:-1]
-                elif event.unicode.isdigit():
-                    inputs[input_field] += event.unicode
+nation2.choose_field(field)
+nation2.choose_religion(religion)
+nation2.choose_hero(hero)
+threading.Thread(target=recv_thread, args=(cli,), daemon=True).start()
 
-    if not running: return
-
-    # 설정 전송
-    client.sendall(json.dumps({'field': field, 'religion': religion, 'hero': hero}).encode())
-
-    # 상대 정보 수신
-    try:
-        opp = json.loads(client.recv(2048).decode())
-        print(f"상대: 분야{FIELDS[opp['field']]}, 종교{RELIGIONS[opp['religion']]}, 위인{HEROES[opp['hero']]}")
-    except:
-        return
-
-    nation2.choose_field(field)
-    nation2.choose_religion(religion)
-    nation2.choose_hero(hero)
-
-    threading.Thread(target=receive_thread, args=(client,), daemon=True).start()
-
-    # GUI 루프
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.MOUSEBUTTONDOWN and not game_over:
-                for btn in buttons:
-                    if btn.rect.collidepoint(event.pos):
-                        btn.click()
-        draw_game_state()
-        clock.tick(30)
-
-    pygame.quit()
-    client.close()
-
-if __name__ == "__main__":
-    main()
+while True:
+    for e in pygame.event.get():
+        if e.type == pygame.QUIT: exit()
+        if e.type == pygame.MOUSEBUTTONDOWN and not game_over:
+            pos = e.pos
+            for b in buttons:
+                if b.rect.collidepoint(pos): b.click()
+            cell = (pos[0] - 60) // 65
+            if 0 <= cell < MAP_SIZE:
+                for u in nation2.units:
+                    if u['pos'] == cell:
+                        selected_unit = u; break
+        if e.type == pygame.MOUSEBUTTONUP and selected_unit and not game_over:
+            cell = (e.pos[0] - 60) // 65
+            if nation2.border_line < cell < MAP_SIZE and cell != selected_unit['pos']:
+                selected_unit['pos'] = cell
+            selected_unit = None
+    draw()
+    clock.tick(30)
