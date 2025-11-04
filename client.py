@@ -43,8 +43,11 @@ class Button:
         screen.blit(font.render(self.txt, True, BLACK), (self.rect.x+10, self.rect.y+8))
     def click(self): self.act()
 
+# 클라이언트는 오른쪽 국가 → 유닛 생성 위치: border_line + 1 (6번 칸 아님, 끝에서 1칸 앞)
+UNIT_SPAWN_POS = MAP_SIZE - 2  # 10번 칸이 끝 → 9번 칸에 생성
+
 buttons = [
-    Button(50, 500, 140, 50, "유닛 생성", lambda: update_msg(nation2.create_unit(nation2.border_line))),
+    Button(50, 500, 140, 50, "유닛 생성", lambda: update_msg(nation2.create_unit(UNIT_SPAWN_POS))),
     Button(200, 500, 140, 50, "훈련장 건설", lambda: update_msg(nation2.build_facility(FacilityType.TRAINING))),
     Button(350, 500, 140, 50, "의회 건설", lambda: update_msg(nation2.build_facility(FacilityType.PARLIAMENT))),
     Button(600, 500, 140, 50, "종료", lambda: pygame.quit() or exit())
@@ -55,11 +58,12 @@ def draw_map():
     cell_w = 65
     for i in range(MAP_SIZE):
         x = 60 + i * cell_w
+        # 클라이언트는 오른쪽 → 자국: i > border_line
         color = RED if i > nation2.border_line else BLUE
         pygame.draw.rect(screen, color, (x, map_y, cell_w-5, 140), border_radius=5)
         if i == nation2.border_line:
             pygame.draw.line(screen, (200,0,0), (x, map_y), (x, map_y+140), 6)
-        # 의회 (자원 수급처)
+        # 의회 (오른쪽 끝)
         if nation2.facilities[FacilityType.PARLIAMENT] and i == MAP_SIZE-1:
             pygame.draw.rect(screen, BROWN, (x+5, map_y+70, 50, 60))
             pygame.draw.polygon(screen, GRAY, [(x+30, map_y+70), (x+15, map_y+50), (x+45, map_y+50)])
